@@ -39,6 +39,7 @@ export interface LevelData {
   width: number;
   height: number;
   tiles: TileType[][]; // tiles[y][x]
+  heightMap: number[][]; // elevation in [0,1] per tile
   pathNodes: PathNode[];
   seed: number;
 }
@@ -52,6 +53,8 @@ export interface GeneratorParams {
   forestDensity: number; // 0.0 - 1.0
   waterLevel: number; // 0.0 - 1.0
   mountainLevel: number; // 0.0 - 1.0
+  pathWidth: number; // 1-5, width of roads
+  switchback: boolean; // enable switchback (zigzag) paths on steep terrain
 }
 
 export const DEFAULT_PARAMS: GeneratorParams = {
@@ -63,6 +66,8 @@ export const DEFAULT_PARAMS: GeneratorParams = {
   forestDensity: 0.4,
   waterLevel: 0.45,
   mountainLevel: 0.7,
+  pathWidth: 2,
+  switchback: false,
 };
 
 export const TILE_COLORS: Record<TileType, string> = {

@@ -8,6 +8,8 @@ import { Noise2D } from '../core/noise';
  *  - Between water and forest → GRASS
  *  - forestDensity threshold → FOREST (on higher ground)
  *  - mountainLevel → MOUNTAIN / ROCK
+ * Also stores the raw elevation values in level.heightMap for use
+ * by slope computation and pathfinding.
  */
 export function generateTerrain(params: GeneratorParams): LevelData {
   const { width, height, seed, waterLevel, forestDensity, mountainLevel } = params;
@@ -19,9 +21,11 @@ export function generateTerrain(params: GeneratorParams): LevelData {
   const scale = 0.08; // Frequency scale for the noise
 
   const tiles: TileType[][] = [];
+  const heightMap: number[][] = [];
 
   for (let y = 0; y < height; y++) {
     tiles[y] = [];
+    heightMap[y] = [];
     for (let x = 0; x < width; x++) {
       // Sample noise at this position
       const nx = x * scale;
@@ -29,6 +33,9 @@ export function generateTerrain(params: GeneratorParams): LevelData {
       const elevation = noise.octaveNoise(nx, ny, 4);
       const detail = detailNoise.octaveNoise(nx * 2, ny * 2, 2);
       const biomeVal = terrainNoise.octaveNoise(nx * 1.5 + 100, ny * 1.5 + 100, 3);
+
+      // Store raw elevation
+      heightMap[y][x] = elevation;
 
       let tile: TileType;
 
@@ -60,6 +67,7 @@ export function generateTerrain(params: GeneratorParams): LevelData {
     width,
     height,
     tiles,
+    heightMap,
     pathNodes: [],
     seed,
   };

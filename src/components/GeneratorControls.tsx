@@ -26,6 +26,8 @@ export function GeneratorControls({
   const [forestDensity, setForestDensity] = useState(DEFAULT_PARAMS.forestDensity);
   const [waterLevel, setWaterLevel] = useState(DEFAULT_PARAMS.waterLevel);
   const [mountainLevel, setMountainLevel] = useState(DEFAULT_PARAMS.mountainLevel);
+  const [pathWidth, setPathWidth] = useState(DEFAULT_PARAMS.pathWidth);
+  const [switchback, setSwitchback] = useState(DEFAULT_PARAMS.switchback);
 
   const handleRandomSeed = () => {
     setSeed(Date.now());
@@ -41,6 +43,8 @@ export function GeneratorControls({
       forestDensity,
       waterLevel,
       mountainLevel,
+      pathWidth,
+      switchback,
     });
   };
 
@@ -162,6 +166,32 @@ export function GeneratorControls({
             onChange={e => setMountainLevel(Number(e.target.value))}
           />
           <span className="value">{mountainLevel.toFixed(2)}</span>
+        </label>
+      </div>
+
+      <div className="control-row">
+        <label>
+          Path Width:
+          <input
+            type="range"
+            min={1}
+            max={5}
+            step={1}
+            value={pathWidth}
+            onChange={e => setPathWidth(Number(e.target.value))}
+          />
+          <span className="value">{pathWidth}</span>
+        </label>
+      </div>
+
+      <div className="control-row">
+        <label>
+          <input
+            type="checkbox"
+            checked={switchback}
+            onChange={e => setSwitchback(e.target.checked)}
+          />
+          Switchback Paths (zigzag on steep terrain)
         </label>
       </div>
 

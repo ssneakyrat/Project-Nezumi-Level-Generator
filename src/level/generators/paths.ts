@@ -1,8 +1,10 @@
 import { TileType, LevelData, GeneratorParams, PathNode, Point } from '../core/types';
+import { findPath, simplifyPath } from './pathfinding';
+import { computeSlope } from './slope';
 
 /**
- * Places POI (Points of Interest) nodes and generates branching paths between them.
- * Paths are carved into the terrain by finding walkable routes.
+ * Places POI (Points of Interest) nodes and generates terrain-aware paths between them
+ * using A* pathfinding. Paths are carved as wide roads into the terrain.
  */
 export function generatePaths(level: LevelData, params: GeneratorParams): void {
   const { width, height, seed, pathDensity } = params;
@@ -112,26 +114,75 @@ export function generatePaths(level: LevelData, params: GeneratorParams): void {
 
   level.pathNodes = pathNodes;
 
-  // 7. Carve paths between connected nodes
+  // 7. Compute slope map from height map for pathfinding
+  const slopeMap = computeSlope(level.heightMap);
+
+  // 8. Carve paths between connected nodes using A* pathfinding
   for (const node of pathNodes) {
     for (const targetId of node.connectedTo) {
       if (targetId > node.id) continue; // Only carve each pair once
 
       const start = node.position;
       const end = pathNodes[targetId].position;
-      carvePath(level.tiles, start, end, width, height);
+
+      // Try terrain-aware A* pathfinding first
+      let path = findPath(start, end, level.tiles, slopeMap, level.heightMap, params);
+
+      // If A* fails (no path), fall back to L-shaped path
+      if (path.length === 0) {
+        path = generateFallbackPath(start, end);
+      }
+
+      // Simplify the path (remove collinear waypoints)
+      path = simplifyPath(path);
+
+      // Carve the path as a wide road
+      carveWideRoad(level.tiles, path, params.pathWidth, width, height);
+
+      // Mark POI clearings at start and end
+      markPOI(level.tiles, start.x, start.y, width, height);
+      markPOI(level.tiles, end.x, end.y, width, height);
     }
   }
 }
 
 /**
- * Carves an L-shaped path between two points through walkable terrain.
- * First moves horizontally from start.x to end.x, then vertically from start.y to end.y.
+ * Fallback: generates a simple L-shaped path (horizontal then vertical).
+ * Used when A* fails to find a path.
  */
-function carvePath(
+function generateFallbackPath(start: Point, end: Point): Point[] {
+  const path: Point[] = [];
+
+  // Horizontal segment at start.y
+  const hStep = end.x >= start.x ? 1 : -1;
+  let cx = start.x;
+  while (cx !== end.x) {
+    path.push({ x: cx, y: start.y });
+    cx += hStep;
+  }
+
+  // Vertical segment at end.x
+  const vStep = end.y >= start.y ? 1 : -1;
+  let cy = start.y;
+  while (cy !== end.y) {
+    path.push({ x: end.x, y: cy });
+    cy += vStep;
+  }
+
+  // Ensure endpoint
+  path.push({ x: end.x, y: end.y });
+
+  return path;
+}
+
+/**
+ * Carves a wide road along a path of points.
+ * Uses a circular brush to mark tiles as PATH.
+ */
+function carveWideRoad(
   tiles: TileType[][],
-  start: Point,
-  end: Point,
+  path: Point[],
+  pathWidth: number,
   width: number,
   height: number,
 ): void {
@@ -145,59 +196,64 @@ function carvePath(
     TileType.CLEARING,
   ]);
 
-  // Mark a tile as path (only convert natural terrain tiles, not water/mountain)
-  const markPath = (x: number, y: number): void => {
-    if (x >= 0 && x < width && y >= 0 && y < height) {
-      const t = tiles[y][x];
-      if (t === TileType.GRASS || t === TileType.DARK_GRASS || t === TileType.SAND) {
-        tiles[y][x] = TileType.PATH;
-      }
-    }
-  };
+  const radius = Math.max(1, Math.floor(pathWidth / 2));
 
-  // Mark a 3x3 POI clearing
-  const markPOI = (x: number, y: number): void => {
-    for (let dy = -1; dy <= 1; dy++) {
-      for (let dx = -1; dx <= 1; dx++) {
-        const cx = x + dx;
-        const cy = y + dy;
+  for (const point of path) {
+    // Carve a brush around each path point
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        // For odd widths, use circular brush; for width=1, just the center
+        if (pathWidth > 1 && pathWidth % 2 === 0) {
+          // Even width: slightly offset to one side to keep it centered-ish
+          if (Math.abs(dx) > radius || Math.abs(dy) > radius) continue;
+        } else if (pathWidth > 1) {
+          // Odd width: circular falloff
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist > radius + 0.5) continue;
+        }
+
+        const cx = point.x + dx;
+        const cy = point.y + dy;
         if (cx >= 0 && cx < width && cy >= 0 && cy < height) {
-          if (walkable.has(tiles[cy][cx])) {
-            tiles[cy][cx] = TileType.CLEARING;
+          const t = tiles[cy][cx];
+          if (walkable.has(t) && t !== TileType.PATH) {
+            tiles[cy][cx] = TileType.PATH;
           }
         }
       }
     }
-  };
-
-  // Mark POI at start and end
-  markPOI(start.x, start.y);
-  markPOI(end.x, end.y);
-
-  // Safety max iterations to prevent any infinite loops
-  const maxSteps = width + height;
-
-  // Phase 1: Walk horizontally from start.x to end.x at start.y
-  const hStep = end.x >= start.x ? 1 : -1;
-  let steps = 0;
-  let cx = start.x;
-  while (cx !== end.x && steps < maxSteps) {
-    markPath(cx, start.y);
-    cx += hStep;
-    steps++;
   }
+}
 
-  // Phase 2: Walk vertically from start.y to end.y at end.x
-  const vStep = end.y >= start.y ? 1 : -1;
-  steps = 0;
-  let cy = start.y;
-  while (cy !== end.y && steps < maxSteps) {
-    markPath(end.x, cy);
-    cy += vStep;
-    steps++;
+/**
+ * Marks a 3x3 POI clearing at the given position.
+ */
+function markPOI(
+  tiles: TileType[][],
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+): void {
+  const walkable = new Set([
+    TileType.GRASS,
+    TileType.DARK_GRASS,
+    TileType.FOREST,
+    TileType.SAND,
+    TileType.ROCK,
+    TileType.PATH,
+    TileType.CLEARING,
+  ]);
+
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const cx = x + dx;
+      const cy = y + dy;
+      if (cx >= 0 && cx < width && cy >= 0 && cy < height) {
+        if (walkable.has(tiles[cy][cx])) {
+          tiles[cy][cx] = TileType.CLEARING;
+        }
+      }
+    }
   }
-
-  // Ensure endpoint is marked
-  markPath(end.x, end.y);
-  markPath(start.x, start.y);
 }
